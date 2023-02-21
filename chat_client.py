@@ -23,18 +23,35 @@ def auth(client: socket) -> bool:
         else:
             print(answer)
 
-def receive(client):
+def sender(client: socket):
+    global client_alive
     while True:
-        print(f'[server]:{decode(client.recv(1024))}') #NOTE
+        msg = input()
+        client.sendall(encode(msg))
+        if msg == DISCONNECT:
+            client_alive = False
+            break
+    
+def main(client: socket):
+    if auth(client):
+        Thread(target=sender, args=(client,), daemon=True).start()
+        while client_alive:
+            answer = decode(client.recv(1024))
+            print(f'[server]:{answer}')
+            if answer == DISCONNECT:
+                break
 
 client = socket()
 client.connect((ADDRESS, PORT))
+client_alive = True
 
-if auth(client):
-    Thread(target=receive, args=(client,), daemon=True).start()
-    while True:
-        msg = input() # убрать текст
-        client.send(encode(msg))
-        if msg == DISCONNECT:
-            break
-client.close()
+try:
+    main(client)
+except BrokenPipeError:
+    print('Client shutdown by error')
+    client.send(encode(DISCONNECT))
+except KeyboardInterrupt:
+    print('Client shutdown by keyboard interrupt')
+    client.send(encode(DISCONNECT))
+finally:
+    client.close()

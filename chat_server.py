@@ -6,9 +6,9 @@ from threading import Thread, Lock
 
 load_dotenv()
 
-ADDRESS = getenv('ADDRESS')
-DISCONNECT = getenv('DISCONNECT')
-AUTH_SUCCESS = getenv('AUTH_SUCCESS')
+ADDRESS: str = getenv('ADDRESS')
+DISCONNECT: str = getenv('DISCONNECT')
+AUTH_SUCCESS: str = getenv('AUTH_SUCCESS')
 try:
     PORT = int(getenv('PORT'))
 except ValueError:
@@ -19,6 +19,34 @@ def encode(text: str, coding='utf-8') -> bytes:
 
 def decode(data: bytes, coding='utf-8') -> str:
     return data.decode(coding)
+
+def receiver(client: socket, cl_name: str):
+    global clients, clients_lock
+    # всегда принимаем сообщения от клиента
+    while True:
+        msg = decode(client.recv(1024))
+        if msg == DISCONNECT:
+            # отключаем его от сервера, если он это инициировал
+            client.close()
+            # запрашиваем блокировку на словарь с клиентами
+            with clients_lock:
+                # удаляем клиента из словаря
+                del clients[cl_name]
+                disconnect_msg = f'Client {cl_name} has disconnected from server'
+                # выводим на сервере, что клиент отключился
+                print(disconnect_msg)
+                # рассылка всем остальным, что клиент отключился
+                for cl_socket in clients.values():
+                    cl_socket.send(encode(disconnect_msg))
+            break
+        # если не disconnect, то выводим сообщение от клиента на сервере
+        server_msg = f'{cl_name}: {msg}'
+        print(server_msg)
+        # рассылка сообщения от пользователя всем остальным, кроме него самого
+        clients_names = list(clients.keys()) 
+        clients_names.remove(cl_name)
+        for name in clients_names:
+            clients[name].send(encode(server_msg))
 
 def auth(client: socket, cl_address: tuple) -> str: # меняем
     global clients, clients_lock # меняем
@@ -32,12 +60,18 @@ def auth(client: socket, cl_address: tuple) -> str: # меняем
             print(f'Client {cl_address} doesn\'t want to speak with us :\'(')
             return # меняем
         if data:
-            # TODO нужно проверять, есть ли такой ник!
-            msg = AUTH_SUCCESS
-            client.send(encode(msg))
-            with clients_lock:
-                clients[data] = client # меняем
-            print(f'Client {cl_address} is authenticated by name {data}') # меняем   
+            if data in clients.keys(): # если среди ников такой уже есть
+                msg = 'The name is already taken, choose another name'
+                client.send(encode(msg))
+            else:
+                msg = AUTH_SUCCESS
+                client.send(encode(msg))
+                with clients_lock:
+                    clients[data] = client # меняем
+                print(f'Client {cl_address} is authenticated by name {data}') # меняем
+                # запускаем поток приёма сообщений от клиента
+                Thread(target=receiver, args=(client, data), daemon=True).start()
+                break
         else:
             msg = 'Please input non-empty name!'
             client.send(encode(msg))
@@ -53,16 +87,18 @@ def main(server: socket) -> None:
     server.listen()
     Thread(target=accept, args=(server,), daemon=True).start()
     while True:
-        if clients:
-            msg, _ = decode(server.recv(1024))  # меняем
-            if msg == DISCONNECT:
-                server.close()
+        user_inp = input()
+        if user_inp == '/shutdown':
+                for cl_socket in clients.values():
+                    cl_socket.send(encode(DISCONNECT))
+                    cl_socket.close()
                 break
-            print(f'Message: {msg}') # меняем
+        elif user_inp == '/clients_list':
+                print(*clients.keys())
 
 if __name__ == '__main__':
     server = socket()
-    clients: dict = {}
+    clients: dict = {} # name: socket
     clients_lock = Lock()
 
     if not (DISCONNECT and AUTH_SUCCESS):
@@ -71,6 +107,8 @@ if __name__ == '__main__':
         try:
             main(server)
         except BrokenPipeError:
-            server.close()
+            print('Server shutdown by error')
         except KeyboardInterrupt:
+            print('Server shutdown by keyboard interrupt')
+        finally:
             server.close()
