@@ -13,7 +13,7 @@ SHUTDOWN: str = getenv('SHUTDOWN', default='/shutdown')
 LIST: str = getenv('LIST', default='/list')
 HELP: str = getenv('HELP', default='/help')
 WHISPER: str = getenv('WHISPER', default='/whisper')
-CL_LIST: str = getenv('CL_LIST', default='/clients_list')
+CL_LIST: str = getenv('CL_LIST', default='/list')
 try:
     PORT = int(getenv('PORT'))
 except ValueError:
@@ -30,29 +30,32 @@ def enum_clients() -> str:
     with clients_lock:
         return '\n' + '\n'.join([f'{num}. {name}' for num, name in enumerate(clients.keys())])
 
+def send_all(msg: str, except_name: str = None):
+    global clients_lock, clients
+    with clients_lock:
+        clients_names = list(clients.keys()) 
+        if except_name:
+            clients_names.remove(except_name)
+        for name in clients_names:
+            clients[name].send(encode(msg))
+
 def receiver(client: socket, cl_name: str):
     global clients, clients_lock
-    # всегда принимаем сообщения от клиента
     while True:
         msg = decode(client.recv(1024))
         if msg == DISCONNECT:
-            # отключаем его от сервера, если он это инициировал
             client.close()
-            # запрашиваем блокировку на словарь с клиентами
             with clients_lock:
-                # удаляем клиента из словаря
                 del clients[cl_name]
                 disconnect_msg = f'Client {cl_name} has disconnected from server'
-                # выводим на сервере, что клиент отключился
                 print(disconnect_msg)
-                # рассылка всем остальным, что клиент отключился
                 for cl_socket in clients.values():
                     cl_socket.send(encode(disconnect_msg))
             break
         # если не disconnect, то проверяем на команду списка клиентов
         elif msg == CL_LIST:
             client.send(encode(enum_clients()))
-        elif msg.startswith(WHISPER): # NOTE
+        elif msg.startswith(WHISPER):
             msg_parts = msg.split()
             if len(msg_parts) >= 3:
                 target_name = msg_parts[1]
@@ -68,13 +71,10 @@ def receiver(client: socket, cl_name: str):
                 client.send(encode('Incorrect command format, usage:\n/whisper name message '))
         # или выводим сообщение от клиента на сервере
         else:
-            clients_names = list(clients.keys()) 
-            clients_names.remove(cl_name)
             server_msg = f'{cl_name}: {msg}'
             print(server_msg)
             # рассылка сообщения от пользователя всем остальным, кроме него самого
-            for name in clients_names:
-                clients[name].send(encode(server_msg))
+            send_all(server_msg, cl_name)
 
 def auth(client: socket, cl_address: tuple) -> str: # меняем
     global clients, clients_lock # меняем
@@ -121,7 +121,7 @@ def main(server: socket) -> None:
                     cl_socket.send(encode(DISCONNECT))
                     cl_socket.close()
                 break
-        elif user_inp == LIST: # меняем
+        elif user_inp == LIST:
             print(enum_clients())
         elif user_inp == HELP:
             print('List of commands:\n/shutdown \n/help\n/list')
