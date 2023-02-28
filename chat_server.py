@@ -14,6 +14,7 @@ LIST: str = getenv('LIST', default='/list')
 HELP: str = getenv('HELP', default='/help')
 WHISPER: str = getenv('WHISPER', default='/whisper')
 CL_LIST: str = getenv('CL_LIST', default='/list')
+BAN: str = getenv('BAN', default='/ban')
 try:
     PORT = int(getenv('PORT'))
 except ValueError:
@@ -34,7 +35,7 @@ def send_all(msg: str, except_name: str = None):
     global clients_lock, clients
     with clients_lock:
         clients_names = list(clients.keys()) 
-        if except_name:
+        if except_name and except_name in clients_names:
             clients_names.remove(except_name)
         for name in clients_names:
             clients[name].send(encode(msg))
@@ -77,7 +78,7 @@ def receiver(client: socket, cl_name: str):
             send_all(server_msg, cl_name)
 
 def auth(client: socket, cl_address: tuple) -> str: # меняем
-    global clients, clients_lock # меняем
+    global clients, clients_lock, banlist # меняем
     client.send(encode(getenv('GREETING', default='Henlo')))
     while True:
         data = decode(client.recv(20))
@@ -91,6 +92,12 @@ def auth(client: socket, cl_address: tuple) -> str: # меняем
             if data in clients.keys(): # если среди ников такой уже есть
                 msg = 'The name is already taken, choose another name'
                 client.send(encode(msg))
+            elif data in banlist:
+                msg = 'You have been banned from server.'
+                client.send(encode(msg))
+                client.send(encode(DISCONNECT))
+                client.close()
+                return
             else:
                 msg = AUTH_SUCCESS
                 client.send(encode(msg))
@@ -110,6 +117,21 @@ def accept(server):
         print(f'Client {cl_address} connected!')
         Thread(target=auth, args=(client, cl_address), daemon=True).start()
 
+def ban(cmd: str):
+    global banlist, clients, clients_lock
+    cmd_parts = cmd.split()
+    if len(cmd_parts) >= 2:
+        target_name = ' '.join(cmd_parts[1:])
+        with clients_lock:
+            if target_name in clients.keys():
+                target_socket = clients[target_name]
+                target_socket.send(encode('You are permanently banned'))
+                target_socket.send(encode(DISCONNECT))
+                target_socket.close()
+                del clients[target_name]
+        banlist.append(target_name)
+        print(f'User {target_name} was banned')
+
 def main(server: socket) -> None:
     server.bind((ADDRESS, PORT))
     server.listen()
@@ -125,12 +147,15 @@ def main(server: socket) -> None:
             print(enum_clients())
         elif user_inp == HELP:
             print('List of commands:\n/shutdown \n/help\n/list')
+        elif user_inp.startswith(BAN): # новое условие
+            ban(user_inp)
 
 
 if __name__ == '__main__':
     server = socket()
     clients: dict = {} # name: socket
     clients_lock = Lock()
+    banlist = []
 
     if not (DISCONNECT and AUTH_SUCCESS):
         print('Error: serving messages have not been loaded')
