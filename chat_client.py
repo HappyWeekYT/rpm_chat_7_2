@@ -1,6 +1,20 @@
 from socket import socket
-from chat_server import ADDRESS, PORT, DISCONNECT, AUTH_SUCCESS,  encode, decode
+from chat_server import DISCONNECT, AUTH_SUCCESS, encode, decode
 from threading import Thread
+from argparse import ArgumentParser
+from sys import argv
+
+
+def parse_args():
+    parser = ArgumentParser()
+    parser.add_argument('-a', '--address', default='127.0.0.1')
+    parser.add_argument('-p', '--port', default='8001')
+    args = parser.parse_args(argv[1:])
+    try:
+        port = int(args.port)
+    except ValueError:
+        port = 8001
+    return args.address, port
 
 
 def auth(client: socket) -> bool:
@@ -42,7 +56,7 @@ def main(client: socket):
                 break
 
 client = socket()
-client.connect((ADDRESS, PORT))
+client.connect(parse_args())
 client_alive = True
 
 try:

@@ -61,12 +61,12 @@ def receiver(client: socket, cl_name: str):
                 target_name = msg_parts[1]
                 target_msg = ' '.join(msg_parts[2:])
                 with clients_lock:
-                    with clients.get(target_name) as target_socket: # убрать default
-                        if target_socket:
-                            server_msg = f'{cl_name} whispered: {target_msg}'
-                            target_socket.send(encode(server_msg))
-                        else:
-                            client.send(encode('There is no client with such name'))
+                    target_socket = clients.get(target_name) # убрать default
+                    if target_socket:
+                        server_msg = f'{cl_name} whispered: {target_msg}'
+                        target_socket.send(encode(server_msg))
+                    else:
+                        client.send(encode('There is no client with such name'))
             else:
                 client.send(encode('Incorrect command format, usage:\n/whisper name message '))
         # или выводим сообщение от клиента на сервере
