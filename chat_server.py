@@ -2,10 +2,21 @@ from socket import socket
 from dotenv import load_dotenv
 from os import getenv
 from threading import Thread, Lock
-
+from psycopg2 import connect
+from time import sleep
 
 load_dotenv()
 
+################################################
+PG_HOST: str = getenv('PG_HOST')
+PG_DBNAME: str = getenv('PG_DBNAME')
+PG_USER: str = getenv('PG_USER')
+PG_PASSWORD: str = getenv('PG_PASSWORD')
+try:
+    PG_PORT: str = getenv('PG_PORT')
+except ValueError:
+    PG_PORT = 5433
+################################################
 ADDRESS: str = getenv('ADDRESS')
 DISCONNECT: str = getenv('DISCONNECT')
 AUTH_SUCCESS: str = getenv('AUTH_SUCCESS')
@@ -15,6 +26,10 @@ HELP: str = getenv('HELP', default='/help')
 WHISPER: str = getenv('WHISPER', default='/whisper')
 CL_LIST: str = getenv('CL_LIST', default='/list')
 BAN: str = getenv('BAN', default='/ban')
+SELECTOR_NAME: str = getenv('BAN_NAME_SELECTOR')
+#################
+INSERT_NAME: str = getenv('BAN_NAME_INSERT')
+#########
 try:
     PORT = int(getenv('PORT'))
 except ValueError:
@@ -77,8 +92,15 @@ def receiver(client: socket, cl_name: str):
             # рассылка сообщения от пользователя всем остальным, кроме него самого
             send_all(server_msg, cl_name)
 
+
+def db_is_banned_name(name: str) -> bool:
+    global db_cursor
+    db_cursor.execute(SELECTOR_NAME.format(name))
+    return bool(db_cursor.fetchall())
+
+
 def auth(client: socket, cl_address: tuple) -> str: # меняем
-    global clients, clients_lock, banlist # меняем
+    global clients, clients_lock
     client.send(encode(getenv('GREETING', default='Henlo')))
     while True:
         data = decode(client.recv(20))
@@ -92,9 +114,10 @@ def auth(client: socket, cl_address: tuple) -> str: # меняем
             if data in clients.keys(): # если среди ников такой уже есть
                 msg = 'The name is already taken, choose another name'
                 client.send(encode(msg))
-            elif data in banlist:
+            elif db_is_banned_name(data):
                 msg = 'You have been banned from server.'
                 client.send(encode(msg))
+                sleep(.1)
                 client.send(encode(DISCONNECT))
                 client.close()
                 return
@@ -117,8 +140,13 @@ def accept(server):
         print(f'Client {cl_address} connected!')
         Thread(target=auth, args=(client, cl_address), daemon=True).start()
 
+def db_ban_name(name: str) -> None:
+    global db_cursor, db_connection
+    db_cursor.execute(INSERT_NAME.format(name))
+    db_connection.commit()
+
 def ban(cmd: str):
-    global banlist, clients, clients_lock
+    global clients, clients_lock
     cmd_parts = cmd.split()
     if len(cmd_parts) >= 2:
         target_name = ' '.join(cmd_parts[1:])
@@ -129,7 +157,7 @@ def ban(cmd: str):
                 target_socket.send(encode(DISCONNECT))
                 target_socket.close()
                 del clients[target_name]
-        banlist.append(target_name)
+        db_ban_name(target_name)
         print(f'User {target_name} was banned')
 
 def main(server: socket) -> None:
@@ -155,7 +183,8 @@ if __name__ == '__main__':
     server = socket()
     clients: dict = {} # name: socket
     clients_lock = Lock()
-    banlist = []
+    db_connection = connect(dbname=PG_DBNAME, host=PG_HOST, port=PG_PORT, user=PG_USER, password=PG_PASSWORD)
+    db_cursor = db_connection.cursor()
 
     if not (DISCONNECT and AUTH_SUCCESS):
         print('Error: serving messages have not been loaded')
@@ -168,3 +197,5 @@ if __name__ == '__main__':
             print('Server shutdown by keyboard interrupt')
         finally:
             server.close()
+            db_cursor.close()
+            db_connection.close()

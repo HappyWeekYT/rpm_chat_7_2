@@ -22,10 +22,10 @@ def auth(client: socket) -> bool:
     while True:
         while True:
             data = input('Your name: ')
-            if data:
+            if data and "'" not in data:
                 break
             else:
-                print('Name must be not empty')
+                print('Name must be not empty and must not consist \' symbol')
         client.send(encode(data))
         answer = decode(client.recv(1024))
         if answer == DISCONNECT:
