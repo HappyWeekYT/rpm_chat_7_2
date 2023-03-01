@@ -22,7 +22,7 @@ def auth(client: socket) -> bool:
     while True:
         while True:
             data = input('Your name: ')
-            if data and "'" not in data:
+            if data and all([sym not in "/'@" for sym in data]):
                 break
             else:
                 print('Name must be not empty and must not consist \' symbol')
